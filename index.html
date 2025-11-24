@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>PoseNet Mobile - Multi-Person</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      color: white;
+      touch-action: none;
+    }
+    #wrapper {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    #output {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scaleX(-1);
+      pointer-events: none;
+    }
+    #loading {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      padding: 15px 25px;
+      border-radius: 20px;
+      font-size: 17px;
+      z-index: 10;
+      text-align: center;
+      max-width: 90%;
+      backdrop-filter: blur(10px);
+    }
+    #controls {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      align-items: center;
+    }
+    button {
+      padding: 18px 35px;
+      background: rgba(0, 122, 255, 0.95);
+      color: white;
+      border: none;
+      border-radius: 30px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+      min-width: 200px;
+    }
+    button:active {
+      transform: scale(0.96);
+      background: rgba(0, 100, 235, 0.95);
+    }
+    .secondary-btn {
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+      padding: 12px 25px;
+      font-size: 15px;
+      min-width: auto;
+    }
+    .hidden {
+      display: none;
+    }
+    #stats {
+      position: absolute;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      padding: 10px 20px;
+      border-radius: 15px;
+      font-size: 14px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+    }
+    #settings {
+      position: absolute;
+      top: 120px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 15px;
+      font-size: 13px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      max-width: 150px;
+    }
+    .setting-item {
+      margin: 8px 0;
+    }
+    .setting-item label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: #aaa;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    .value {
+      color: #0ff;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrapper">
+    <div id="loading">Loading AI model...</div>
+    <div id="stats" class="hidden">
+      People: <span id="peopleCount" class="value">0</span> | 
+      FPS: <span id="fps" class="value">0</span>
+    </div>
+    <div id="settings" class="hidden">
+      <div class="setting-item">
+        <label>Max People: <span id="maxPeopleVal" class="value">3</span></label>
+        <input type="range" id="maxPeople" min="1" max="5" value="3">
+      </div>
+      <div class="setting-item">
+        <label>Confidence: <span id="confVal" class="value">0.3</span></label>
+        <input type="range" id="confidence" min="10" max="70" value="30">
+      </div>
+    </div>
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="output"></canvas>
+    <div id="controls">
+      <button id="startBtn">Start Camera</button>
+      <button id="flipBtn" class="secondary-btn hidden">Flip Camera</button>
+      <button id="settingsBtn" class="secondary-btn hidden">Settings</button>
+    </div>
+  </div>
+
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <!-- PoseNet -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
+  <script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("output");
+    const ctx = canvas.getContext("2d");
+    const loadingEl = document.getElementById("loading");
+    const startBtn = document.getElementById("startBtn");
+    const flipBtn = document.getElementById("flipBtn");
+    const settingsBtn = document.getElementById("settingsBtn");
+    const statsEl = document.getElementById("stats");
+    const settingsEl = document.getElementById("settings");
+    const fpsEl = document.getElementById("fps");
+    const peopleCountEl = document.getElementById("peopleCount");
+    
+    // Settings controls
+    const maxPeopleSlider = document.getElementById("maxPeople");
+    const maxPeopleVal = document.getElementById("maxPeopleVal");
+    const confidenceSlider = document.getElementById("confidence");
+    const confVal = document.getElementById("confVal");
+    
+    let net = null;
+    let previousPoses = [];
+    const smoothingFactor = 0.4;
+    let isRunning = false;
+    let facingMode = 'user';
+    let stream = null;
+    let maxDetections = 3;
+    let minConfidence = 0.3;
+    
+    // Color palette for different people
+    const colors = [
+      { keypoint: '#00ff00', skeleton: '#00ffff' }, // Green/Cyan
+      { keypoint: '#ff00ff', skeleton: '#ffff00' }, // Magenta/Yellow
+      { keypoint: '#ff6600', skeleton: '#0099ff' }, // Orange/Blue
+      { keypoint: '#ff0066', skeleton: '#66ff00' }, // Pink/Lime
+      { keypoint: '#6600ff', skeleton: '#ffff00' }, // Purple/Yellow
+    ];
+    
+    // FPS tracking
+    let lastFrameTime = Date.now();
+    let frameCount = 0;
+
+    // Settings event listeners
+    maxPeopleSlider.addEventListener('input', (e) => {
+      maxDetections = parseInt(e.target.value);
+      maxPeopleVal.textContent = maxDetections;
+    });
+
+    confidenceSlider.addEventListener('input', (e) => {
+      minConfidence = e.target.value / 100;
+      confVal.textContent = minConfidence.toFixed(2);
+    });
+
+    async function setupCamera() {
+      loadingEl.textContent = "Starting camera...";
+      
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { 
+          facingMode: facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+      });
+      
+      video.srcObject = stream;
+      
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          video.play();
+          setTimeout(() => {
+            const videoAspect = video.videoWidth / video.videoHeight;
+            const windowAspect = window.innerWidth / window.innerHeight;
+            
+            if (windowAspect > videoAspect) {
+              canvas.height = window.innerHeight;
+              canvas.width = window.innerHeight * videoAspect;
+            } else {
+              canvas.width = window.innerWidth;
+              canvas.height = window.innerWidth / videoAspect;
+            }
+            
+            resolve();
+          }, 500);
+        };
+      });
+    }
+
+    function smoothKeypoints(keypoints, previousKeypoints) {
+      if (!previousKeypoints || previousKeypoints.length === 0) {
+        return keypoints.map(kp => ({...kp, position: {...kp.position}}));
+      }
+
+      return keypoints.map((kp, i) => {
+        const prev = previousKeypoints[i];
+        if (!prev) return kp;
+
+        return {
+          ...kp,
+          position: {
+            x: prev.position.x * smoothingFactor + kp.position.x * (1 - smoothingFactor),
+            y: prev.position.y * smoothingFactor + kp.position.y * (1 - smoothingFactor)
+          }
+        };
+      });
+    }
+
+    function drawKeypoints(keypoints, minConf, ctx, color) {
+      const scale = canvas.width / video.videoWidth;
+      
+      keypoints.forEach((kp) => {
+        if (kp.score < minConf) return;
+        
+        const { y, x } = kp.position;
+        
+        ctx.beginPath();
+        ctx.arc(x * scale, y * scale, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = color.keypoint;
+        ctx.fill();
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      });
+    }
+
+    function drawSkeleton(keypoints, minConf, ctx, color) {
+      const scale = canvas.width / video.videoWidth;
+      const adjacentKeyPoints = posenet.getAdjacentKeyPoints(
+        keypoints,
+        minConf
+      );
+      
+      adjacentKeyPoints.forEach(([kp1, kp2]) => {
+        const { y: y1, x: x1 } = kp1.position;
+        const { y: y2, x: x2 } = kp2.position;
+        
+        ctx.beginPath();
+        ctx.moveTo(x1 * scale, y1 * scale);
+        ctx.lineTo(x2 * scale, y2 * scale);
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = color.skeleton;
+        ctx.stroke();
+      });
+    }
+
+    function updateFPS() {
+      frameCount++;
+      const now = Date.now();
+      const elapsed = now - lastFrameTime;
+      
+      if (elapsed >= 1000) {
+        const fps = Math.round((frameCount * 1000) / elapsed);
+        fpsEl.textContent = fps;
+        frameCount = 0;
+        lastFrameTime = now;
+      }
+    }
+
+    async function detectPose() {
+      if (!net || !isRunning) return;
+      
+      // Detect multiple poses
+      const poses = await net.estimateMultiplePoses(video, {
+        flipHorizontal: false,
+        maxDetections: maxDetections,
+        scoreThreshold: minConfidence - 0.1,
+        nmsRadius: 20
+      });
+
+      // Update people count
+      peopleCountEl.textContent = poses.length;
+
+      // Smooth each pose
+      const smoothedPoses = poses.map((pose, i) => {
+        const prev = previousPoses[i];
+        return {
+          ...pose,
+          keypoints: smoothKeypoints(pose.keypoints, prev ? prev.keypoints : null)
+        };
+      });
+
+      previousPoses = smoothedPoses;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw each person with a different color
+      smoothedPoses.forEach((pose, i) => {
+        const color = colors[i % colors.length];
+        drawKeypoints(pose.keypoints, minConfidence, ctx, color);
+        drawSkeleton(pose.keypoints, minConfidence, ctx, color);
+      });
+      
+      updateFPS();
+
+      requestAnimationFrame(detectPose);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        startBtn.disabled = true;
+        await setupCamera();
+        loadingEl.textContent = "Move around! 👋";
+        statsEl.classList.remove('hidden');
+        flipBtn.classList.remove('hidden');
+        settingsBtn.classList.remove('hidden');
+        startBtn.classList.add('hidden');
+        isRunning = true;
+        detectPose();
+      } catch (err) {
+        console.error("Error:", err);
+        loadingEl.textContent = "Error: " + err.message;
+        startBtn.disabled = false;
+      }
+    });
+
+    flipBtn.addEventListener('click', async () => {
+      facingMode = facingMode === 'user' ? 'environment' : 'user';
+      previousPoses = [];
+      await setupCamera();
+    });
+
+    settingsBtn.addEventListener('click', () => {
+      settingsEl.classList.toggle('hidden');
+    });
+
+    async function init() {
+      try {
+        loadingEl.textContent = "Loading AI model...";
+        
+        net = await posenet.load({
+          architecture: "MobileNetV1",
+          outputStride: 16,
+          inputResolution: { width: 640, height: 480 },
+          multiplier: 0.75,
+        });
+
+        loadingEl.textContent = "Ready! Tap Start Camera";
+        startBtn.disabled = false;
+      } catch (err) {
+        console.error("Error:", err);
+        loadingEl.textContent = "Error loading model";
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
