@@ -35,13 +35,14 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1);
+      /* Removed mirror transform */
     }
     #output {
       position: absolute;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%) scaleX(-1);
+      transform: translate(-50%, -50%);
+      /* Removed mirror transform */
       pointer-events: none;
     }
     #loading {
@@ -146,12 +147,12 @@
     </div>
     <div id="settings" class="hidden">
       <div class="setting-item">
-        <label>Max People: <span id="maxPeopleVal" class="value">3</span></label>
-        <input type="range" id="maxPeople" min="1" max="5" value="3">
+        <label>Max People: <span id="maxPeopleVal" class="value">2</span></label>
+        <input type="range" id="maxPeople" min="1" max="5" value="2">
       </div>
       <div class="setting-item">
-        <label>Confidence: <span id="confVal" class="value">0.3</span></label>
-        <input type="range" id="confidence" min="10" max="70" value="30">
+        <label>Confidence: <span id="confVal" class="value">0.5</span></label>
+        <input type="range" id="confidence" min="20" max="80" value="50">
       </div>
     </div>
     <video id="video" playsinline autoplay muted></video>
@@ -188,12 +189,12 @@
     
     let net = null;
     let previousPoses = [];
-    const smoothingFactor = 0.4;
+    const smoothingFactor = 0.5;
     let isRunning = false;
     let facingMode = 'user';
     let stream = null;
-    let maxDetections = 3;
-    let minConfidence = 0.3;
+    let maxDetections = 2; // Changed default to 2
+    let minConfidence = 0.5; // Increased from 0.3 to 0.5
     
     // Color palette for different people
     const colors = [
@@ -252,6 +253,9 @@
               canvas.height = window.innerWidth / videoAspect;
             }
             
+            console.log("Canvas size:", canvas.width, canvas.height);
+            console.log("Video size:", video.videoWidth, video.videoHeight);
+            
             resolve();
           }, 500);
         };
@@ -286,11 +290,11 @@
         const { y, x } = kp.position;
         
         ctx.beginPath();
-        ctx.arc(x * scale, y * scale, 10, 0, 2 * Math.PI);
+        ctx.arc(x * scale, y * scale, 12, 0, 2 * Math.PI); // Bigger dots
         ctx.fillStyle = color.keypoint;
         ctx.fill();
         ctx.strokeStyle = "white";
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4; // Thicker stroke
         ctx.stroke();
       });
     }
@@ -302,6 +306,8 @@
         minConf
       );
       
+      console.log("Drawing skeleton with", adjacentKeyPoints.length, "connections");
+      
       adjacentKeyPoints.forEach(([kp1, kp2]) => {
         const { y: y1, x: x1 } = kp1.position;
         const { y: y2, x: x2 } = kp2.position;
@@ -309,7 +315,7 @@
         ctx.beginPath();
         ctx.moveTo(x1 * scale, y1 * scale);
         ctx.lineTo(x2 * scale, y2 * scale);
-        ctx.lineWidth = 5;
+        ctx.lineWidth = 6; // Much thicker lines
         ctx.strokeStyle = color.skeleton;
         ctx.stroke();
       });
@@ -331,12 +337,12 @@
     async function detectPose() {
       if (!net || !isRunning) return;
       
-      // Detect multiple poses
+      // Detect multiple poses with better settings
       const poses = await net.estimateMultiplePoses(video, {
-        flipHorizontal: false,
+        flipHorizontal: true, // Changed to true to fix mirror
         maxDetections: maxDetections,
-        scoreThreshold: minConfidence - 0.1,
-        nmsRadius: 20
+        scoreThreshold: 0.4, // Higher threshold
+        nmsRadius: 30 // Increased to reduce duplicate detections
       });
 
       // Update people count
