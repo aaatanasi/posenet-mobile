@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>PoseNet Mobile - Multi-Person</title>
+  <title>PoseNet Mobile</title>
   <style>
     * {
       margin: 0;
@@ -27,22 +27,26 @@
       position: relative;
       width: 100vw;
       height: 100vh;
+    }
+    #videoContainer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       display: flex;
       justify-content: center;
       align-items: center;
     }
     #video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      /* Removed mirror transform */
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
     }
     #output {
       position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      /* Removed mirror transform */
+      top: 0;
+      left: 0;
       pointer-events: none;
     }
     #loading {
@@ -108,30 +112,6 @@
       z-index: 10;
       backdrop-filter: blur(10px);
     }
-    #settings {
-      position: absolute;
-      top: 120px;
-      right: 10px;
-      background: rgba(0,0,0,0.8);
-      padding: 15px;
-      border-radius: 15px;
-      font-size: 13px;
-      z-index: 10;
-      backdrop-filter: blur(10px);
-      max-width: 150px;
-    }
-    .setting-item {
-      margin: 8px 0;
-    }
-    .setting-item label {
-      display: block;
-      margin-bottom: 5px;
-      font-size: 12px;
-      color: #aaa;
-    }
-    input[type="range"] {
-      width: 100%;
-    }
     .value {
       color: #0ff;
       font-weight: bold;
@@ -143,24 +123,16 @@
     <div id="loading">Loading AI model...</div>
     <div id="stats" class="hidden">
       People: <span id="peopleCount" class="value">0</span> | 
-      FPS: <span id="fps" class="value">0</span>
+      FPS: <span id="fps" class="value">0</span> |
+      Keypoints: <span id="keypointCount" class="value">0</span>
     </div>
-    <div id="settings" class="hidden">
-      <div class="setting-item">
-        <label>Max People: <span id="maxPeopleVal" class="value">2</span></label>
-        <input type="range" id="maxPeople" min="1" max="5" value="2">
-      </div>
-      <div class="setting-item">
-        <label>Confidence: <span id="confVal" class="value">0.5</span></label>
-        <input type="range" id="confidence" min="20" max="80" value="50">
-      </div>
+    <div id="videoContainer">
+      <video id="video" playsinline autoplay muted></video>
     </div>
-    <video id="video" playsinline autoplay muted></video>
     <canvas id="output"></canvas>
     <div id="controls">
       <button id="startBtn">Start Camera</button>
       <button id="flipBtn" class="secondary-btn hidden">Flip Camera</button>
-      <button id="settingsBtn" class="secondary-btn hidden">Settings</button>
     </div>
   </div>
 
@@ -175,17 +147,10 @@
     const loadingEl = document.getElementById("loading");
     const startBtn = document.getElementById("startBtn");
     const flipBtn = document.getElementById("flipBtn");
-    const settingsBtn = document.getElementById("settingsBtn");
     const statsEl = document.getElementById("stats");
-    const settingsEl = document.getElementById("settings");
     const fpsEl = document.getElementById("fps");
     const peopleCountEl = document.getElementById("peopleCount");
-    
-    // Settings controls
-    const maxPeopleSlider = document.getElementById("maxPeople");
-    const maxPeopleVal = document.getElementById("maxPeopleVal");
-    const confidenceSlider = document.getElementById("confidence");
-    const confVal = document.getElementById("confVal");
+    const keypointCountEl = document.getElementById("keypointCount");
     
     let net = null;
     let previousPoses = [];
@@ -193,32 +158,17 @@
     let isRunning = false;
     let facingMode = 'user';
     let stream = null;
-    let maxDetections = 2; // Changed default to 2
-    let minConfidence = 0.5; // Increased from 0.3 to 0.5
+    let minConfidence = 0.4;
     
-    // Color palette for different people
+    // Color palette
     const colors = [
-      { keypoint: '#00ff00', skeleton: '#00ffff' }, // Green/Cyan
-      { keypoint: '#ff00ff', skeleton: '#ffff00' }, // Magenta/Yellow
-      { keypoint: '#ff6600', skeleton: '#0099ff' }, // Orange/Blue
-      { keypoint: '#ff0066', skeleton: '#66ff00' }, // Pink/Lime
-      { keypoint: '#6600ff', skeleton: '#ffff00' }, // Purple/Yellow
+      { keypoint: '#00ff00', skeleton: '#00ffff' },
+      { keypoint: '#ff00ff', skeleton: '#ffff00' },
     ];
     
     // FPS tracking
     let lastFrameTime = Date.now();
     let frameCount = 0;
-
-    // Settings event listeners
-    maxPeopleSlider.addEventListener('input', (e) => {
-      maxDetections = parseInt(e.target.value);
-      maxPeopleVal.textContent = maxDetections;
-    });
-
-    confidenceSlider.addEventListener('input', (e) => {
-      minConfidence = e.target.value / 100;
-      confVal.textContent = minConfidence.toFixed(2);
-    });
 
     async function setupCamera() {
       loadingEl.textContent = "Starting camera...";
@@ -231,8 +181,8 @@
         audio: false,
         video: { 
           facingMode: facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 640 },
+          height: { ideal: 480 }
         },
       });
       
@@ -242,19 +192,18 @@
         video.onloadedmetadata = () => {
           video.play();
           setTimeout(() => {
-            const videoAspect = video.videoWidth / video.videoHeight;
-            const windowAspect = window.innerWidth / window.innerHeight;
+            // Position canvas to match video
+            const rect = video.getBoundingClientRect();
+            canvas.style.left = rect.left + 'px';
+            canvas.style.top = rect.top + 'px';
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
             
-            if (windowAspect > videoAspect) {
-              canvas.height = window.innerHeight;
-              canvas.width = window.innerHeight * videoAspect;
-            } else {
-              canvas.width = window.innerWidth;
-              canvas.height = window.innerWidth / videoAspect;
-            }
-            
-            console.log("Canvas size:", canvas.width, canvas.height);
-            console.log("Video size:", video.videoWidth, video.videoHeight);
+            console.log("Video rect:", rect);
+            console.log("Video dimensions:", video.videoWidth, video.videoHeight);
+            console.log("Canvas dimensions:", canvas.width, canvas.height);
             
             resolve();
           }, 500);
@@ -282,40 +231,43 @@
     }
 
     function drawKeypoints(keypoints, minConf, ctx, color) {
-      const scale = canvas.width / video.videoWidth;
-      
+      let count = 0;
       keypoints.forEach((kp) => {
         if (kp.score < minConf) return;
+        count++;
         
         const { y, x } = kp.position;
         
+        // Draw a bigger, more visible keypoint
         ctx.beginPath();
-        ctx.arc(x * scale, y * scale, 12, 0, 2 * Math.PI); // Bigger dots
+        ctx.arc(x, y, 15, 0, 2 * Math.PI);
         ctx.fillStyle = color.keypoint;
         ctx.fill();
         ctx.strokeStyle = "white";
-        ctx.lineWidth = 4; // Thicker stroke
+        ctx.lineWidth = 5;
         ctx.stroke();
+        
+        // Log first keypoint for debugging
+        if (count === 1) {
+          console.log("Drawing keypoint at:", x, y);
+        }
       });
+      return count;
     }
 
     function drawSkeleton(keypoints, minConf, ctx, color) {
-      const scale = canvas.width / video.videoWidth;
-      const adjacentKeyPoints = posenet.getAdjacentKeyPoints(
-        keypoints,
-        minConf
-      );
+      const adjacentKeyPoints = posenet.getAdjacentKeyPoints(keypoints, minConf);
       
-      console.log("Drawing skeleton with", adjacentKeyPoints.length, "connections");
+      console.log("Adjacent keypoints found:", adjacentKeyPoints.length);
       
       adjacentKeyPoints.forEach(([kp1, kp2]) => {
         const { y: y1, x: x1 } = kp1.position;
         const { y: y2, x: x2 } = kp2.position;
         
         ctx.beginPath();
-        ctx.moveTo(x1 * scale, y1 * scale);
-        ctx.lineTo(x2 * scale, y2 * scale);
-        ctx.lineWidth = 6; // Much thicker lines
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineWidth = 8;
         ctx.strokeStyle = color.skeleton;
         ctx.stroke();
       });
@@ -337,39 +289,34 @@
     async function detectPose() {
       if (!net || !isRunning) return;
       
-      // Detect multiple poses with better settings
-      const poses = await net.estimateMultiplePoses(video, {
-        flipHorizontal: true, // Changed to true to fix mirror
-        maxDetections: maxDetections,
-        scoreThreshold: 0.4, // Higher threshold
-        nmsRadius: 30 // Increased to reduce duplicate detections
+      // Use single pose for simpler, more reliable detection
+      const pose = await net.estimateSinglePose(video, {
+        flipHorizontal: facingMode === 'user', // Only flip for front camera
       });
 
-      // Update people count
-      peopleCountEl.textContent = poses.length;
+      console.log("Pose score:", pose.score);
+      
+      // Smooth the pose
+      const smoothedKeypoints = smoothKeypoints(
+        pose.keypoints, 
+        previousPoses.length > 0 ? previousPoses[0].keypoints : null
+      );
+      
+      previousPoses = [{keypoints: smoothedKeypoints}];
 
-      // Smooth each pose
-      const smoothedPoses = poses.map((pose, i) => {
-        const prev = previousPoses[i];
-        return {
-          ...pose,
-          keypoints: smoothKeypoints(pose.keypoints, prev ? prev.keypoints : null)
-        };
-      });
+      // Update stats
+      peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
-      previousPoses = smoothedPoses;
-
+      // Clear and draw
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // Draw each person with a different color
-      smoothedPoses.forEach((pose, i) => {
-        const color = colors[i % colors.length];
-        drawKeypoints(pose.keypoints, minConfidence, ctx, color);
-        drawSkeleton(pose.keypoints, minConfidence, ctx, color);
-      });
+      const color = colors[0];
+      const keypointCount = drawKeypoints(smoothedKeypoints, minConfidence, ctx, color);
+      drawSkeleton(smoothedKeypoints, minConfidence, ctx, color);
+      
+      keypointCountEl.textContent = keypointCount;
       
       updateFPS();
-
       requestAnimationFrame(detectPose);
     }
 
@@ -380,7 +327,6 @@
         loadingEl.textContent = "Move around! 👋";
         statsEl.classList.remove('hidden');
         flipBtn.classList.remove('hidden');
-        settingsBtn.classList.remove('hidden');
         startBtn.classList.add('hidden');
         isRunning = true;
         detectPose();
@@ -395,10 +341,6 @@
       facingMode = facingMode === 'user' ? 'environment' : 'user';
       previousPoses = [];
       await setupCamera();
-    });
-
-    settingsBtn.addEventListener('click', () => {
-      settingsEl.classList.toggle('hidden');
     });
 
     async function init() {
