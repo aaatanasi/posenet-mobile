@@ -10,7 +10,6 @@
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
     }
     body {
       background: #000;
@@ -18,33 +17,26 @@
       overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       color: white;
-      touch-action: none;
     }
     #container {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
     }
     #video {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      transform: scaleX(-1);
+      display: none;
     }
-    #output {
+    #canvas {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      pointer-events: none;
     }
     #loading {
-      position: absolute;
+      position: fixed;
       top: 20px;
       left: 50%;
       transform: translateX(-50%);
@@ -55,10 +47,9 @@
       z-index: 10;
       text-align: center;
       max-width: 90%;
-      backdrop-filter: blur(10px);
     }
     #controls {
-      position: absolute;
+      position: fixed;
       bottom: 40px;
       left: 50%;
       transform: translateX(-50%);
@@ -76,17 +67,10 @@
       border-radius: 30px;
       font-size: 18px;
       font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 5px 20px rgba(0,0,0,0.4);
       min-width: 200px;
-    }
-    button:active {
-      transform: scale(0.96);
-      background: rgba(0, 100, 235, 0.95);
     }
     .secondary-btn {
       background: rgba(255, 255, 255, 0.2);
-      backdrop-filter: blur(10px);
       padding: 12px 25px;
       font-size: 15px;
       min-width: auto;
@@ -95,7 +79,7 @@
       display: none;
     }
     #stats {
-      position: absolute;
+      position: fixed;
       top: 70px;
       left: 50%;
       transform: translateX(-50%);
@@ -104,7 +88,6 @@
       border-radius: 15px;
       font-size: 14px;
       z-index: 10;
-      backdrop-filter: blur(10px);
     }
     .value {
       color: #0ff;
@@ -121,7 +104,7 @@
       Keypoints: <span id="keypointCount" class="value">0</span>
     </div>
     <video id="video" playsinline autoplay muted></video>
-    <canvas id="output"></canvas>
+    <canvas id="canvas"></canvas>
     <div id="controls">
       <button id="startBtn">Start Camera</button>
       <button id="flipBtn" class="secondary-btn hidden">Flip Camera</button>
@@ -132,7 +115,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
   <script>
     const video = document.getElementById("video");
-    const canvas = document.getElementById("output");
+    const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
     const loadingEl = document.getElementById("loading");
     const startBtn = document.getElementById("startBtn");
@@ -178,9 +161,9 @@
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             
-            console.log("Setup complete");
-            console.log("Video size:", video.videoWidth, video.videoHeight);
-            console.log("Canvas size:", canvas.width, canvas.height);
+            console.log("Video:", video.videoWidth, "x", video.videoHeight);
+            console.log("Canvas:", canvas.width, "x", canvas.height);
+            console.log("Window:", window.innerWidth, "x", window.innerHeight);
             
             resolve();
           }, 500);
@@ -211,62 +194,45 @@
       return smoothed;
     }
 
-    function getCanvasCoordinates(x, y) {
-      const videoWidth = video.videoWidth;
-      const videoHeight = video.videoHeight;
-      const videoAspect = videoWidth / videoHeight;
-      
-      const canvasWidth = canvas.width;
-      const canvasHeight = canvas.height;
-      const canvasAspect = canvasWidth / canvasHeight;
-      
-      let scale, offsetX, offsetY;
-      
-      // object-fit: cover behavior
-      if (canvasAspect > videoAspect) {
-        // Canvas is wider - video fills width, crops top/bottom
-        scale = canvasWidth / videoWidth;
-        offsetX = 0;
-        offsetY = (canvasHeight - videoHeight * scale) / 2;
-      } else {
-        // Canvas is taller - video fills height, crops left/right
-        scale = canvasHeight / videoHeight;
-        offsetX = (canvasWidth - videoWidth * scale) / 2;
-        offsetY = 0;
-      }
-      
-      // Scale coordinates
-      let canvasX = x * scale + offsetX;
-      let canvasY = y * scale + offsetY;
-      
-      // Mirror X for front camera
-      if (facingMode === 'user') {
-        canvasX = canvasWidth - canvasX;
-      }
-      
-      return { x: canvasX, y: canvasY };
+    function drawFrame() {
+      // Draw video frame mirrored
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+      ctx.restore();
     }
 
     function drawKeypoints(keypoints, minConf, ctx) {
       let count = 0;
       
+      // Calculate scale from video to canvas
+      const scaleX = canvas.width / video.videoWidth;
+      const scaleY = canvas.height / video.videoHeight;
+      
       keypoints.forEach((kp, index) => {
         if (kp.score < minConf) return;
         count++;
         
-        const { y, x } = kp.position;
-        const coords = getCanvasCoordinates(x, y);
+        let { y, x } = kp.position;
+        
+        // Scale to canvas size
+        x = x * scaleX;
+        y = y * scaleY;
+        
+        // Mirror horizontally
+        x = canvas.width - x;
         
         if (index === 0) {
-          console.log(`Video: ${x.toFixed(0)}, ${y.toFixed(0)} -> Canvas: ${coords.x.toFixed(0)}, ${coords.y.toFixed(0)}`);
+          console.log(`Keypoint 0: Original(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> Scaled(${x.toFixed(0)}, ${y.toFixed(0)})`);
         }
         
+        // Draw big visible keypoint
         ctx.beginPath();
-        ctx.arc(coords.x, coords.y, 15, 0, 2 * Math.PI);
+        ctx.arc(x, y, 20, 0, 2 * Math.PI);
         ctx.fillStyle = '#00ff00';
         ctx.fill();
-        ctx.strokeStyle = "white";
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 6;
         ctx.stroke();
       });
       
@@ -276,17 +242,28 @@
     function drawSkeleton(keypoints, minConf, ctx) {
       const adjacentKeyPoints = posenet.getAdjacentKeyPoints(keypoints, minConf);
       
+      const scaleX = canvas.width / video.videoWidth;
+      const scaleY = canvas.height / video.videoHeight;
+      
       adjacentKeyPoints.forEach(([kp1, kp2]) => {
-        const pos1 = getCanvasCoordinates(kp1.position.x, kp1.position.y);
-        const pos2 = getCanvasCoordinates(kp2.position.x, kp2.position.y);
+        let x1 = kp1.position.x * scaleX;
+        let y1 = kp1.position.y * scaleY;
+        let x2 = kp2.position.x * scaleX;
+        let y2 = kp2.position.y * scaleY;
+        
+        // Mirror horizontally
+        x1 = canvas.width - x1;
+        x2 = canvas.width - x2;
         
         ctx.beginPath();
-        ctx.moveTo(pos1.x, pos1.y);
-        ctx.lineTo(pos2.x, pos2.y);
-        ctx.lineWidth = 8;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineWidth = 10;
         ctx.strokeStyle = '#00ffff';
         ctx.stroke();
       });
+      
+      console.log("Drew", adjacentKeyPoints.length, "skeleton lines");
     }
 
     function updateFPS() {
@@ -313,8 +290,13 @@
 
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
+      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
+      // Draw video frame
+      drawFrame();
+      
+      // Draw pose
       const keypointCount = drawKeypoints(smoothedKeypoints, minConfidence, ctx);
       drawSkeleton(smoothedKeypoints, minConfidence, ctx);
       
@@ -344,13 +326,6 @@
     flipBtn.addEventListener('click', async () => {
       facingMode = facingMode === 'user' ? 'environment' : 'user';
       previousKeypoints = null;
-      
-      if (facingMode === 'user') {
-        video.style.transform = 'scaleX(-1)';
-      } else {
-        video.style.transform = 'scaleX(1)';
-      }
-      
       await setupCamera();
     });
 
