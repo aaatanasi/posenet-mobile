@@ -72,7 +72,7 @@
     let isRunning = false;
     let facingMode = "user";
     let stream = null;
-    let minConfidence = 0.3;
+    let minConfidence = 0.2;
 
     let lastFrameTime = performance.now();
     let frames = 0;
@@ -80,19 +80,16 @@
     function resizeCanvasToDisplaySize() {
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       const rect = canvas.getBoundingClientRect();
-      const needResize = canvas.width !== Math.round(rect.width * dpr) || canvas.height !== Math.round(rect.height * dpr);
-
-      if (needResize) {
-        canvas.width = Math.round(rect.width * dpr);
-        canvas.height = Math.round(rect.height * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
     async function setupCamera() {
-      loadingEl.textContent = "Starting camera…";
-
-      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
 
       const constraints = {
         audio: false,
@@ -111,11 +108,9 @@
           video.play();
           setTimeout(() => {
             resizeCanvasToDisplaySize();
-            console.log("Camera:", facingMode);
-            console.log("Video:", video.videoWidth, "x", video.videoHeight);
-            console.log("Canvas:", canvas.width, "x", canvas.height);
+            console.log("Camera ready:", facingMode, video.videoWidth, "x", video.videoHeight);
             resolve();
-          }, 200);
+          }, 300);
         };
       });
     }
@@ -123,11 +118,9 @@
     function coverLayout() {
       const vw = video.videoWidth || 1;
       const vh = video.videoHeight || 1;
-
       const rect = canvas.getBoundingClientRect();
       const cw = rect.width;
       const ch = rect.height;
-
       const videoAspect = vw / vh;
       const canvasAspect = cw / ch;
 
@@ -145,7 +138,7 @@
         offY = 0;
         scale = ch / vh;
       }
-      return { drawW, drawH, offX, offY, scale };
+      return { drawW, drawH, offX, offY, scale, cw, ch };
     }
 
     function smoothKeypoints(keypoints) {
@@ -168,11 +161,10 @@
     }
 
     function drawFrame() {
-      const { drawW, drawH, offX, offY } = coverLayout();
-
+      const { drawW, drawH, offX, offY, cw } = coverLayout();
       ctx.save();
       if (facingMode === "user") {
-        ctx.translate(canvas.getBoundingClientRect().width, 0);
+        ctx.translate(cw, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(video, offX, offY, drawW, drawH);
       } else {
@@ -182,16 +174,12 @@
     }
 
     function mapToCanvas(x, y) {
-      const { offX, offY, scale } = coverLayout();
-      const rect = canvas.getBoundingClientRect();
-      
+      const { offX, offY, scale, cw } = coverLayout();
       let cx = x * scale + offX;
       let cy = y * scale + offY;
       
-      // When using flipHorizontal: true, PoseNet already flips the coordinates
-      // But our video display is also flipped, so we need to flip them back to match
       if (facingMode === "user") {
-        cx = rect.width - cx;
+        cx = cw - cx;
       }
       
       return { x: cx, y: cy };
@@ -204,17 +192,16 @@
         count++;
         const { x, y } = mapToCanvas(kp.position.x, kp.position.y);
         
-        // Debug first keypoint
         if (i === 0) {
-          console.log(`KP0: pose(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)})`);
+          console.log(`Keypoint 0: pose(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)}), score: ${kp.score.toFixed(2)}`);
         }
         
         ctx.beginPath();
-        ctx.arc(x, y, 12, 0, 2 * Math.PI);
+        ctx.arc(x, y, 15, 0, 2 * Math.PI);
         ctx.fillStyle = "#00ff00";
         ctx.fill();
         ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
         ctx.stroke();
       });
       return count;
@@ -223,15 +210,20 @@
     function drawSkeleton(keypoints, minConf) {
       const adjacent = posenet.getAdjacentKeyPoints(keypoints, minConf);
       
-      console.log("Drawing", adjacent.length, "skeleton connections");
+      console.log("Skeleton connections:", adjacent.length);
+      
+      if (adjacent.length === 0) {
+        console.warn("No skeleton connections - try lowering confidence threshold");
+      }
       
       adjacent.forEach(([a, b]) => {
         const p1 = mapToCanvas(a.position.x, a.position.y);
         const p2 = mapToCanvas(b.position.x, b.position.y);
+        
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-        ctx.lineWidth = 5;
+        ctx.lineWidth = 6;
         ctx.strokeStyle = "#00ffff";
         ctx.stroke();
       });
@@ -257,14 +249,15 @@
       });
 
       const smoothed = smoothKeypoints(pose.keypoints);
-
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
       const rect = canvas.getBoundingClientRect();
       ctx.clearRect(0, 0, rect.width, rect.height);
+      
       drawFrame();
       const keypointCount = drawKeypoints(smoothed, minConfidence);
       drawSkeleton(smoothed, minConfidence);
+      
       keypointCountEl.textContent = String(keypointCount);
 
       updateFPS();
@@ -274,29 +267,46 @@
     startBtn.addEventListener("click", async () => {
       try {
         startBtn.disabled = true;
+        loadingEl.textContent = "Starting camera...";
         await setupCamera();
+        loadingEl.textContent = "Move around! 👋";
         statsEl.classList.remove("hidden");
         flipBtn.classList.remove("hidden");
         startBtn.classList.add("hidden");
-        loadingEl.textContent = "Move around! 👋";
         isRunning = true;
         detectPose();
       } catch (err) {
-        loadingEl.textContent = "Error: " + (err && err.message ? err.message : err);
-        startBtn.disabled = false;
         console.error(err);
+        loadingEl.textContent = "Camera error: " + err.message;
+        startBtn.disabled = false;
       }
     });
 
     flipBtn.addEventListener("click", async () => {
-      facingMode = facingMode === "user" ? "environment" : "user";
-      previousKeypoints = null;
-      await setupCamera();
+      try {
+        flipBtn.disabled = true;
+        loadingEl.textContent = "Switching camera...";
+        isRunning = false;
+        
+        facingMode = facingMode === "user" ? "environment" : "user";
+        previousKeypoints = null;
+        
+        await setupCamera();
+        
+        loadingEl.textContent = "Move around! 👋";
+        flipBtn.disabled = false;
+        isRunning = true;
+        detectPose();
+      } catch (err) {
+        console.error(err);
+        loadingEl.textContent = "Camera flip error";
+        flipBtn.disabled = false;
+        isRunning = true;
+        detectPose();
+      }
     });
 
-    window.addEventListener("resize", () => {
-      resizeCanvasToDisplaySize();
-    });
+    window.addEventListener("resize", resizeCanvasToDisplaySize);
 
     async function init() {
       try {
@@ -315,7 +325,7 @@
         startBtn.disabled = false;
       } catch (err) {
         console.error(err);
-        loadingEl.textContent = "Error loading model";
+        loadingEl.textContent = "Model loading error";
       }
     }
 
