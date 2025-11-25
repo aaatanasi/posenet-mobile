@@ -2,32 +2,76 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>PoseNet Mobile (iPhone Fix)</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#000; height:100vh; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,sans-serif; color:#fff; }
+    body {
+      background:#000;
+      height:100vh;
+      overflow:hidden;
+      font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+      color:#fff;
+    }
     #container { position:fixed; inset:0; }
     #video { display:none; }
-    #canvas { position:absolute; inset:0; width:100%; height:100%; }
+    #canvas {
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+    }
     #loading {
-      position:fixed; top:20px; left:50%; transform:translateX(-50%);
-      background:rgba(0,0,0,.85); padding:12px 18px; border-radius:16px; font-size:16px; z-index:10;
+      position:fixed;
+      top:20px;
+      left:50%;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,.85);
+      padding:12px 18px;
+      border-radius:16px;
+      font-size:16px;
+      z-index:10;
     }
     #controls {
-      position:fixed; bottom:40px; left:50%; transform:translateX(-50%); z-index:10;
-      display:flex; flex-direction:column; gap:12px; align-items:center;
+      position:fixed;
+      bottom:40px;
+      left:50%;
+      transform:translateX(-50%);
+      z-index:10;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      align-items:center;
     }
     button {
-      padding:16px 28px; background:rgba(0,122,255,.95); color:#fff; border:0; border-radius:28px;
-      font-size:16px; font-weight:600; min-width:200px;
+      padding:16px 28px;
+      background:rgba(0,122,255,.95);
+      color:#fff;
+      border:0;
+      border-radius:28px;
+      font-size:16px;
+      font-weight:600;
+      min-width:200px;
     }
-    .secondary-btn { background:rgba(255,255,255,.2); padding:10px 20px; font-size:14px; min-width:auto; }
+    .secondary-btn {
+      background:rgba(255,255,255,.2);
+      padding:10px 20px;
+      font-size:14px;
+      min-width:auto;
+    }
     .hidden { display:none; }
     #stats {
-      position:fixed; top:64px; left:50%; transform:translateX(-50%);
-      background:rgba(0,0,0,.7); padding:8px 14px; border-radius:12px; font-size:13px; z-index:10;
+      position:fixed;
+      top:64px;
+      left:50%;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,.7);
+      padding:8px 14px;
+      border-radius:12px;
+      font-size:13px;
+      z-index:10;
     }
     .value { color:#0ff; font-weight:700; }
   </style>
@@ -35,6 +79,7 @@
 <body>
   <div id="container">
     <div id="loading">Loading AI model...</div>
+
     <div id="stats" class="hidden">
       People: <span id="peopleCount" class="value">0</span> |
       FPS: <span id="fps" class="value">0</span> |
@@ -50,7 +95,9 @@
     </div>
   </div>
 
+  <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+  <!-- PoseNet -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.1/dist/posenet.min.js"></script>
 
   <script>
@@ -72,7 +119,9 @@
     let isRunning = false;
     let facingMode = "user";
     let stream = null;
-    let minConfidence = 0.2;
+
+    // Lowered for mobile – iPhone confidence is usually lower
+    let minConfidence = 0.05;
 
     let lastFrameTime = performance.now();
     let frames = 0;
@@ -86,10 +135,14 @@
     }
 
     async function setupCamera() {
+      // Properly stop previous stream for iPhone
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
-        stream = null;
       }
+      video.srcObject = null;
+      stream = null;
+      // Small delay helps iOS recover between camera switches
+      await new Promise(r => setTimeout(r, 200));
 
       const constraints = {
         audio: false,
@@ -161,27 +214,16 @@
     }
 
     function drawFrame() {
-      const { drawW, drawH, offX, offY, cw } = coverLayout();
-      ctx.save();
-      if (facingMode === "user") {
-        ctx.translate(cw, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, offX, offY, drawW, drawH);
-      } else {
-        ctx.drawImage(video, offX, offY, drawW, drawH);
-      }
-      ctx.restore();
+      const { drawW, drawH, offX, offY } = coverLayout();
+      // No mirroring here – we keep video and coordinates in same space
+      ctx.drawImage(video, offX, offY, drawW, drawH);
     }
 
     function mapToCanvas(x, y) {
-      const { offX, offY, scale, cw } = coverLayout();
-      let cx = x * scale + offX;
-      let cy = y * scale + offY;
-      
-      if (facingMode === "user") {
-        cx = cw - cx;
-      }
-      
+      const { offX, offY, scale } = coverLayout();
+      // Map PoseNet coordinates directly to canvas (no extra flip)
+      const cx = x * scale + offX;
+      const cy = y * scale + offY;
       return { x: cx, y: cy };
     }
 
@@ -190,18 +232,23 @@
       keypoints.forEach((kp, i) => {
         if (kp.score < minConf) return;
         count++;
-        const { x, y } = mapToCanvas(kp.position.x, kp.position.y);
-        
+
+        const mapped = mapToCanvas(kp.position.x, kp.position.y);
+        const x = mapped.x;
+        const y = mapped.y;
+
         if (i === 0) {
-          console.log(`Keypoint 0: pose(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)}), score: ${kp.score.toFixed(2)}`);
+          console.log(
+            `Keypoint 0: pose(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)}), score: ${kp.score.toFixed(2)}`
+          );
         }
-        
+
         ctx.beginPath();
-        ctx.arc(x, y, 15, 0, 2 * Math.PI);
+        ctx.arc(x, y, 12, 0, 2 * Math.PI);
         ctx.fillStyle = "#00ff00";
         ctx.fill();
         ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 4;
+        ctx.lineWidth = 3;
         ctx.stroke();
       });
       return count;
@@ -209,21 +256,20 @@
 
     function drawSkeleton(keypoints, minConf) {
       const adjacent = posenet.getAdjacentKeyPoints(keypoints, minConf);
-      
+
       console.log("Skeleton connections:", adjacent.length);
-      
       if (adjacent.length === 0) {
         console.warn("No skeleton connections - try lowering confidence threshold");
       }
-      
+
       adjacent.forEach(([a, b]) => {
         const p1 = mapToCanvas(a.position.x, a.position.y);
         const p2 = mapToCanvas(b.position.x, b.position.y);
-        
+
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-        ctx.lineWidth = 6;
+        ctx.lineWidth = 5;
         ctx.strokeStyle = "#00ffff";
         ctx.stroke();
       });
@@ -244,8 +290,9 @@
     async function detectPose() {
       if (!net || !isRunning) return;
 
+      // No flipHorizontal – keep everything in video space
       const pose = await net.estimateSinglePose(video, {
-        flipHorizontal: facingMode === "user"
+        flipHorizontal: false
       });
 
       const smoothed = smoothKeypoints(pose.keypoints);
@@ -253,11 +300,11 @@
 
       const rect = canvas.getBoundingClientRect();
       ctx.clearRect(0, 0, rect.width, rect.height);
-      
+
       drawFrame();
       const keypointCount = drawKeypoints(smoothed, minConfidence);
       drawSkeleton(smoothed, minConfidence);
-      
+
       keypointCountEl.textContent = String(keypointCount);
 
       updateFPS();
@@ -287,12 +334,12 @@
         flipBtn.disabled = true;
         loadingEl.textContent = "Switching camera...";
         isRunning = false;
-        
+
         facingMode = facingMode === "user" ? "environment" : "user";
         previousKeypoints = null;
-        
+
         await setupCamera();
-        
+
         loadingEl.textContent = "Move around! 👋";
         flipBtn.disabled = false;
         isRunning = true;
