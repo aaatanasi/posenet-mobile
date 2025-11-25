@@ -27,26 +27,21 @@
       position: relative;
       width: 100vw;
       height: 100vh;
-    }
-    #videoContainer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
       display: flex;
       justify-content: center;
       align-items: center;
     }
     #video {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
     #output {
       position: absolute;
       top: 0;
       left: 0;
+      width: 100%;
+      height: 100%;
       pointer-events: none;
     }
     #loading {
@@ -126,9 +121,7 @@
       FPS: <span id="fps" class="value">0</span> |
       Keypoints: <span id="keypointCount" class="value">0</span>
     </div>
-    <div id="videoContainer">
-      <video id="video" playsinline autoplay muted></video>
-    </div>
+    <video id="video" playsinline autoplay muted></video>
     <canvas id="output"></canvas>
     <div id="controls">
       <button id="startBtn">Start Camera</button>
@@ -158,7 +151,7 @@
     let isRunning = false;
     let facingMode = 'user';
     let stream = null;
-    let minConfidence = 0.4;
+    let minConfidence = 0.3;
     
     // Color palette
     const colors = [
@@ -169,6 +162,12 @@
     // FPS tracking
     let lastFrameTime = Date.now();
     let frameCount = 0;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      console.log("Canvas resized to:", canvas.width, canvas.height);
+    }
 
     async function setupCamera() {
       loadingEl.textContent = "Starting camera...";
@@ -181,8 +180,8 @@
         audio: false,
         video: { 
           facingMode: facingMode,
-          width: { ideal: 640 },
-          height: { ideal: 480 }
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
         },
       });
       
@@ -192,19 +191,8 @@
         video.onloadedmetadata = () => {
           video.play();
           setTimeout(() => {
-            // Position canvas to match video
-            const rect = video.getBoundingClientRect();
-            canvas.style.left = rect.left + 'px';
-            canvas.style.top = rect.top + 'px';
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.style.width = rect.width + 'px';
-            canvas.style.height = rect.height + 'px';
-            
-            console.log("Video rect:", rect);
+            resizeCanvas();
             console.log("Video dimensions:", video.videoWidth, video.videoHeight);
-            console.log("Canvas dimensions:", canvas.width, canvas.height);
-            
             resolve();
           }, 500);
         };
@@ -232,25 +220,35 @@
 
     function drawKeypoints(keypoints, minConf, ctx, color) {
       let count = 0;
-      keypoints.forEach((kp) => {
+      
+      // Calculate scale factors
+      const scaleX = canvas.width / video.videoWidth;
+      const scaleY = canvas.height / video.videoHeight;
+      
+      keypoints.forEach((kp, index) => {
         if (kp.score < minConf) return;
         count++;
         
         const { y, x } = kp.position;
         
-        // Draw a bigger, more visible keypoint
+        // Scale the coordinates to canvas size
+        const canvasX = x * scaleX;
+        const canvasY = y * scaleY;
+        
+        // Log for debugging
+        if (index === 0) {
+          console.log(`Keypoint 0: video(${x.toFixed(1)}, ${y.toFixed(1)}) -> canvas(${canvasX.toFixed(1)}, ${canvasY.toFixed(1)})`);
+          console.log(`Scale factors: ${scaleX.toFixed(2)} x ${scaleY.toFixed(2)}`);
+        }
+        
+        // Draw keypoint
         ctx.beginPath();
-        ctx.arc(x, y, 15, 0, 2 * Math.PI);
+        ctx.arc(canvasX, canvasY, 15, 0, 2 * Math.PI);
         ctx.fillStyle = color.keypoint;
         ctx.fill();
         ctx.strokeStyle = "white";
         ctx.lineWidth = 5;
         ctx.stroke();
-        
-        // Log first keypoint for debugging
-        if (count === 1) {
-          console.log("Drawing keypoint at:", x, y);
-        }
       });
       return count;
     }
@@ -258,15 +256,23 @@
     function drawSkeleton(keypoints, minConf, ctx, color) {
       const adjacentKeyPoints = posenet.getAdjacentKeyPoints(keypoints, minConf);
       
-      console.log("Adjacent keypoints found:", adjacentKeyPoints.length);
+      // Calculate scale factors
+      const scaleX = canvas.width / video.videoWidth;
+      const scaleY = canvas.height / video.videoHeight;
       
       adjacentKeyPoints.forEach(([kp1, kp2]) => {
         const { y: y1, x: x1 } = kp1.position;
         const { y: y2, x: x2 } = kp2.position;
         
+        // Scale coordinates
+        const canvasX1 = x1 * scaleX;
+        const canvasY1 = y1 * scaleY;
+        const canvasX2 = x2 * scaleX;
+        const canvasY2 = y2 * scaleY;
+        
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+        ctx.moveTo(canvasX1, canvasY1);
+        ctx.lineTo(canvasX2, canvasY2);
         ctx.lineWidth = 8;
         ctx.strokeStyle = color.skeleton;
         ctx.stroke();
@@ -289,12 +295,9 @@
     async function detectPose() {
       if (!net || !isRunning) return;
       
-      // Use single pose for simpler, more reliable detection
       const pose = await net.estimateSinglePose(video, {
-        flipHorizontal: facingMode === 'user', // Only flip for front camera
+        flipHorizontal: facingMode === 'user',
       });
-
-      console.log("Pose score:", pose.score);
       
       // Smooth the pose
       const smoothedKeypoints = smoothKeypoints(
@@ -341,6 +344,12 @@
       facingMode = facingMode === 'user' ? 'environment' : 'user';
       previousPoses = [];
       await setupCamera();
+    });
+
+    // Handle orientation changes
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', () => {
+      setTimeout(resizeCanvas, 100);
     });
 
     async function init() {
