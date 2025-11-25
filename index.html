@@ -2,83 +2,102 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+  />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <title>PoseNet Mobile (iPhone Fix)</title>
+  <title>PoseNet Mobile Simple</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      background:#000;
-      height:100vh;
-      overflow:hidden;
-      font-family:-apple-system,BlinkMacSystemFont,sans-serif;
-      color:#fff;
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
-    #container { position:fixed; inset:0; }
-    #video { display:none; }
+    body {
+      background: #000;
+      height: 100vh;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #fff;
+    }
+    #container {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+    }
     #canvas {
-      position:absolute;
-      inset:0;
-      width:100%;
-      height:100%;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    #video {
+      display: none;
     }
     #loading {
-      position:fixed;
-      top:20px;
-      left:50%;
-      transform:translateX(-50%);
-      background:rgba(0,0,0,.85);
-      padding:12px 18px;
-      border-radius:16px;
-      font-size:16px;
-      z-index:10;
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      padding: 10px 16px;
+      border-radius: 16px;
+      font-size: 15px;
+      z-index: 10;
     }
     #controls {
-      position:fixed;
-      bottom:40px;
-      left:50%;
-      transform:translateX(-50%);
-      z-index:10;
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-      align-items:center;
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: center;
     }
     button {
-      padding:16px 28px;
-      background:rgba(0,122,255,.95);
-      color:#fff;
-      border:0;
-      border-radius:28px;
-      font-size:16px;
-      font-weight:600;
-      min-width:200px;
+      padding: 14px 24px;
+      background: rgba(0, 122, 255, 0.95);
+      color: #fff;
+      border: 0;
+      border-radius: 24px;
+      font-size: 15px;
+      font-weight: 600;
+      min-width: 180px;
     }
     .secondary-btn {
-      background:rgba(255,255,255,.2);
-      padding:10px 20px;
-      font-size:14px;
-      min-width:auto;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 10px 18px;
+      font-size: 13px;
+      min-width: auto;
     }
-    .hidden { display:none; }
+    .hidden {
+      display: none;
+    }
     #stats {
-      position:fixed;
-      top:64px;
-      left:50%;
-      transform:translateX(-50%);
-      background:rgba(0,0,0,.7);
-      padding:8px 14px;
-      border-radius:12px;
-      font-size:13px;
-      z-index:10;
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      padding: 6px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      z-index: 10;
     }
-    .value { color:#0ff; font-weight:700; }
+    .value {
+      color: #0ff;
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
   <div id="container">
-    <div id="loading">Loading AI model...</div>
+    <div id="loading">Loading AI model…</div>
 
     <div id="stats" class="hidden">
       People: <span id="peopleCount" class="value">0</span> |
@@ -120,83 +139,63 @@
     let facingMode = "user";
     let stream = null;
 
-    // Lowered for mobile – iPhone confidence is usually lower
+    // Lower confidence for mobile
     let minConfidence = 0.05;
 
     let lastFrameTime = performance.now();
     let frames = 0;
 
-    function resizeCanvasToDisplaySize() {
-      const dpr = Math.max(1, window.devicePixelRatio || 1);
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    function resizeCanvasToVideo() {
+      if (!video.videoWidth || !video.videoHeight) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      console.log("Canvas size:", canvas.width, canvas.height);
     }
 
     async function setupCamera() {
-      // Properly stop previous stream for iPhone
       if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+        stream.getTracks().forEach((t) => t.stop());
       }
       video.srcObject = null;
       stream = null;
-      // Small delay helps iOS recover between camera switches
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 200));
 
       const constraints = {
         audio: false,
         video: {
           facingMode,
           width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
+          height: { ideal: 720 },
+        },
       };
 
       stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream;
 
-      return new Promise(resolve => {
+      return new Promise((resolve) => {
         video.onloadedmetadata = () => {
           video.play();
           setTimeout(() => {
-            resizeCanvasToDisplaySize();
-            console.log("Camera ready:", facingMode, video.videoWidth, "x", video.videoHeight);
+            resizeCanvasToVideo();
+            console.log(
+              "Camera ready:",
+              facingMode,
+              video.videoWidth,
+              "x",
+              video.videoHeight
+            );
             resolve();
           }, 300);
         };
       });
     }
 
-    function coverLayout() {
-      const vw = video.videoWidth || 1;
-      const vh = video.videoHeight || 1;
-      const rect = canvas.getBoundingClientRect();
-      const cw = rect.width;
-      const ch = rect.height;
-      const videoAspect = vw / vh;
-      const canvasAspect = cw / ch;
-
-      let drawW, drawH, offX, offY, scale;
-      if (canvasAspect > videoAspect) {
-        drawW = cw;
-        drawH = cw / videoAspect;
-        offX = 0;
-        offY = (ch - drawH) / 2;
-        scale = cw / vw;
-      } else {
-        drawH = ch;
-        drawW = ch * videoAspect;
-        offX = (cw - drawW) / 2;
-        offY = 0;
-        scale = ch / vh;
-      }
-      return { drawW, drawH, offX, offY, scale, cw, ch };
-    }
-
     function smoothKeypoints(keypoints) {
       if (!previousKeypoints) {
-        previousKeypoints = keypoints.map(kp => ({ ...kp, position: { ...kp.position } }));
+        previousKeypoints = keypoints.map((kp) => ({
+          ...kp,
+          position: { ...kp.position },
+        }));
         return keypoints;
       }
       const smoothed = keypoints.map((kp, i) => {
@@ -204,27 +203,20 @@
         return {
           ...kp,
           position: {
-            x: prev.position.x * smoothingFactor + kp.position.x * (1 - smoothingFactor),
-            y: prev.position.y * smoothingFactor + kp.position.y * (1 - smoothingFactor)
-          }
+            x:
+              prev.position.x * smoothingFactor +
+              kp.position.x * (1 - smoothingFactor),
+            y:
+              prev.position.y * smoothingFactor +
+              kp.position.y * (1 - smoothingFactor),
+          },
         };
       });
-      previousKeypoints = smoothed.map(kp => ({ ...kp, position: { ...kp.position } }));
+      previousKeypoints = smoothed.map((kp) => ({
+        ...kp,
+        position: { ...kp.position },
+      }));
       return smoothed;
-    }
-
-    function drawFrame() {
-      const { drawW, drawH, offX, offY } = coverLayout();
-      // No mirroring here – we keep video and coordinates in same space
-      ctx.drawImage(video, offX, offY, drawW, drawH);
-    }
-
-    function mapToCanvas(x, y) {
-      const { offX, offY, scale } = coverLayout();
-      // Map PoseNet coordinates directly to canvas (no extra flip)
-      const cx = x * scale + offX;
-      const cy = y * scale + offY;
-      return { x: cx, y: cy };
     }
 
     function drawKeypoints(keypoints, minConf) {
@@ -233,18 +225,19 @@
         if (kp.score < minConf) return;
         count++;
 
-        const mapped = mapToCanvas(kp.position.x, kp.position.y);
-        const x = mapped.x;
-        const y = mapped.y;
+        const x = kp.position.x;
+        const y = kp.position.y;
 
         if (i === 0) {
           console.log(
-            `Keypoint 0: pose(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)}), score: ${kp.score.toFixed(2)}`
+            `Keypoint 0: (${x.toFixed(0)}, ${y.toFixed(
+              0
+            )}), score: ${kp.score.toFixed(2)}`
           );
         }
 
         ctx.beginPath();
-        ctx.arc(x, y, 12, 0, 2 * Math.PI);
+        ctx.arc(x, y, 10, 0, 2 * Math.PI);
         ctx.fillStyle = "#00ff00";
         ctx.fill();
         ctx.strokeStyle = "#ffffff";
@@ -258,17 +251,16 @@
       const adjacent = posenet.getAdjacentKeyPoints(keypoints, minConf);
 
       console.log("Skeleton connections:", adjacent.length);
-      if (adjacent.length === 0) {
-        console.warn("No skeleton connections - try lowering confidence threshold");
-      }
 
       adjacent.forEach(([a, b]) => {
-        const p1 = mapToCanvas(a.position.x, a.position.y);
-        const p2 = mapToCanvas(b.position.x, b.position.y);
+        const x1 = a.position.x;
+        const y1 = a.position.y;
+        const x2 = b.position.x;
+        const y2 = b.position.y;
 
         ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
         ctx.lineWidth = 5;
         ctx.strokeStyle = "#00ffff";
         ctx.stroke();
@@ -290,18 +282,28 @@
     async function detectPose() {
       if (!net || !isRunning) return;
 
-      // No flipHorizontal – keep everything in video space
       const pose = await net.estimateSinglePose(video, {
-        flipHorizontal: false
+        flipHorizontal: facingMode === "user", // for front camera
       });
 
       const smoothed = smoothKeypoints(pose.keypoints);
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
-      const rect = canvas.getBoundingClientRect();
-      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      drawFrame();
+      // Draw video into canvas
+      if (facingMode === "user") {
+        // Mirror entire canvas for selfie
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+
+      // Draw skeleton in canvas coordinate space
       const keypointCount = drawKeypoints(smoothed, minConfidence);
       drawSkeleton(smoothed, minConfidence);
 
@@ -353,8 +355,6 @@
       }
     });
 
-    window.addEventListener("resize", resizeCanvasToDisplaySize);
-
     async function init() {
       try {
         loadingEl.textContent = "Loading AI model…";
@@ -365,7 +365,7 @@
           architecture: "MobileNetV1",
           outputStride: 16,
           inputResolution: { width: 353, height: 353 },
-          multiplier: 0.75
+          multiplier: 0.75,
         });
 
         loadingEl.textContent = "Ready! Tap Start Camera";
