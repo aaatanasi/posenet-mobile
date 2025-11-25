@@ -1,9 +1,7 @@
-<!-- /index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!-- Prevent iOS zoom + enable proper viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>PoseNet Mobile (iPhone Fix)</title>
@@ -11,7 +9,7 @@
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#000; height:100vh; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,sans-serif; color:#fff; }
     #container { position:fixed; inset:0; }
-    #video { display:none; } /* keep hidden, we draw to canvas */
+    #video { display:none; }
     #canvas { position:absolute; inset:0; width:100%; height:100%; }
     #loading {
       position:fixed; top:20px; left:50%; transform:translateX(-50%);
@@ -43,7 +41,6 @@
       Keypoints: <span id="keypointCount" class="value">0</span>
     </div>
 
-    <!-- Important: playsinline for iOS -->
     <video id="video" playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
 
@@ -53,7 +50,6 @@
     </div>
   </div>
 
-  <!-- Lock versions: PoseNet works reliably with tfjs 3.21.0 -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.1/dist/posenet.min.js"></script>
 
@@ -81,7 +77,6 @@
     let lastFrameTime = performance.now();
     let frames = 0;
 
-    // Maintain DPR-correct canvas so coordinates line up on iPhone
     function resizeCanvasToDisplaySize() {
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       const rect = canvas.getBoundingClientRect();
@@ -90,17 +85,15 @@
       if (needResize) {
         canvas.width = Math.round(rect.width * dpr);
         canvas.height = Math.round(rect.height * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // scale drawing ops to CSS pixels
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
     }
 
     async function setupCamera() {
       loadingEl.textContent = "Starting camera…";
 
-      // stop old stream
       if (stream) stream.getTracks().forEach(t => t.stop());
 
-      // iPhone likes exact/ideal 1280x720
       const constraints = {
         audio: false,
         video: {
@@ -116,13 +109,11 @@
       return new Promise(resolve => {
         video.onloadedmetadata = () => {
           video.play();
-          // Give iOS a tiny moment to update videoWidth/Height
           setTimeout(() => {
             resizeCanvasToDisplaySize();
             console.log("Camera:", facingMode);
             console.log("Video:", video.videoWidth, "x", video.videoHeight);
-            console.log("Canvas CSS:", canvas.getBoundingClientRect().width, "x", canvas.getBoundingClientRect().height,
-                        " | backing:", canvas.width, "x", canvas.height);
+            console.log("Canvas:", canvas.width, "x", canvas.height);
             resolve();
           }, 200);
         };
@@ -130,7 +121,6 @@
     }
 
     function coverLayout() {
-      // Compute how the video is drawn (object-fit: cover) in CSS pixel space
       const vw = video.videoWidth || 1;
       const vh = video.videoHeight || 1;
 
@@ -181,7 +171,6 @@
       const { drawW, drawH, offX, offY } = coverLayout();
 
       ctx.save();
-      // Mirror the video for front camera for *visuals only*
       if (facingMode === "user") {
         ctx.translate(canvas.getBoundingClientRect().width, 0);
         ctx.scale(-1, 1);
@@ -193,10 +182,18 @@
     }
 
     function mapToCanvas(x, y) {
-      // Map PoseNet video-space coords -> canvas CSS pixel coords (account for "cover" + letterboxing)
       const { offX, offY, scale } = coverLayout();
-      const cx = x * scale + offX;
-      const cy = y * scale + offY;
+      const rect = canvas.getBoundingClientRect();
+      
+      let cx = x * scale + offX;
+      let cy = y * scale + offY;
+      
+      // When using flipHorizontal: true, PoseNet already flips the coordinates
+      // But our video display is also flipped, so we need to flip them back to match
+      if (facingMode === "user") {
+        cx = rect.width - cx;
+      }
+      
       return { x: cx, y: cy };
     }
 
@@ -206,23 +203,35 @@
         if (kp.score < minConf) return;
         count++;
         const { x, y } = mapToCanvas(kp.position.x, kp.position.y);
+        
+        // Debug first keypoint
+        if (i === 0) {
+          console.log(`KP0: pose(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)})`);
+        }
+        
         ctx.beginPath();
-        ctx.arc(x, y, 6, 0, 2 * Math.PI);
+        ctx.arc(x, y, 12, 0, 2 * Math.PI);
         ctx.fillStyle = "#00ff00";
         ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 3;
+        ctx.stroke();
       });
       return count;
     }
 
     function drawSkeleton(keypoints, minConf) {
       const adjacent = posenet.getAdjacentKeyPoints(keypoints, minConf);
+      
+      console.log("Drawing", adjacent.length, "skeleton connections");
+      
       adjacent.forEach(([a, b]) => {
         const p1 = mapToCanvas(a.position.x, a.position.y);
         const p2 = mapToCanvas(b.position.x, b.position.y);
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 5;
         ctx.strokeStyle = "#00ffff";
         ctx.stroke();
       });
@@ -243,7 +252,6 @@
     async function detectPose() {
       if (!net || !isRunning) return;
 
-      // Let PoseNet handle the horizontal flip for front camera
       const pose = await net.estimateSinglePose(video, {
         flipHorizontal: facingMode === "user"
       });
@@ -252,8 +260,8 @@
 
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
-      // Clear + draw frame + overlays
-      ctx.clearRect(0, 0, canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height);
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width, rect.height);
       drawFrame();
       const keypointCount = drawKeypoints(smoothed, minConfidence);
       drawSkeleton(smoothed, minConfidence);
@@ -282,7 +290,7 @@
 
     flipBtn.addEventListener("click", async () => {
       facingMode = facingMode === "user" ? "environment" : "user";
-      previousKeypoints = null; // reset smoothing
+      previousKeypoints = null;
       await setupCamera();
     });
 
@@ -293,13 +301,13 @@
     async function init() {
       try {
         loadingEl.textContent = "Loading AI model…";
-        await tf.setBackend("webgl"); // iPhone: best performance
+        await tf.setBackend("webgl");
         await tf.ready();
 
         net = await posenet.load({
           architecture: "MobileNetV1",
           outputStride: 16,
-          inputResolution: { width: 353, height: 353 }, // robust on mobile
+          inputResolution: { width: 353, height: 353 },
           multiplier: 0.75
         });
 
