@@ -14,27 +14,26 @@
     }
     body {
       background: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
       height: 100vh;
       overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       color: white;
       touch-action: none;
     }
-    #wrapper {
+    #container {
       position: relative;
       width: 100vw;
       height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      overflow: hidden;
     }
     #video {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
+      transform: scaleX(-1);
     }
     #output {
       position: absolute;
@@ -114,7 +113,7 @@
   </style>
 </head>
 <body>
-  <div id="wrapper">
+  <div id="container">
     <div id="loading">Loading AI model...</div>
     <div id="stats" class="hidden">
       People: <span id="peopleCount" class="value">0</span> | 
@@ -129,9 +128,7 @@
     </div>
   </div>
 
-  <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <!-- PoseNet -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
   <script>
     const video = document.getElementById("video");
@@ -146,28 +143,15 @@
     const keypointCountEl = document.getElementById("keypointCount");
     
     let net = null;
-    let previousPoses = [];
+    let previousKeypoints = null;
     const smoothingFactor = 0.5;
     let isRunning = false;
     let facingMode = 'user';
     let stream = null;
     let minConfidence = 0.3;
     
-    // Color palette
-    const colors = [
-      { keypoint: '#00ff00', skeleton: '#00ffff' },
-      { keypoint: '#ff00ff', skeleton: '#ffff00' },
-    ];
-    
-    // FPS tracking
     let lastFrameTime = Date.now();
     let frameCount = 0;
-
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      console.log("Canvas resized to:", canvas.width, canvas.height);
-    }
 
     async function setupCamera() {
       loadingEl.textContent = "Starting camera...";
@@ -180,8 +164,8 @@
         audio: false,
         video: { 
           facingMode: facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 640 },
+          height: { ideal: 480 }
         },
       });
       
@@ -191,20 +175,28 @@
         video.onloadedmetadata = () => {
           video.play();
           setTimeout(() => {
-            resizeCanvas();
-            console.log("Video dimensions:", video.videoWidth, video.videoHeight);
+            // Set canvas to full screen
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            console.log("Setup complete");
+            console.log("Video size:", video.videoWidth, video.videoHeight);
+            console.log("Canvas size:", canvas.width, canvas.height);
+            console.log("Window size:", window.innerWidth, window.innerHeight);
+            
             resolve();
           }, 500);
         };
       });
     }
 
-    function smoothKeypoints(keypoints, previousKeypoints) {
-      if (!previousKeypoints || previousKeypoints.length === 0) {
-        return keypoints.map(kp => ({...kp, position: {...kp.position}}));
+    function smoothKeypoints(keypoints) {
+      if (!previousKeypoints) {
+        previousKeypoints = keypoints.map(kp => ({...kp, position: {...kp.position}}));
+        return keypoints;
       }
 
-      return keypoints.map((kp, i) => {
+      const smoothed = keypoints.map((kp, i) => {
         const prev = previousKeypoints[i];
         if (!prev) return kp;
 
@@ -216,65 +208,86 @@
           }
         };
       });
+
+      previousKeypoints = smoothed.map(kp => ({...kp, position: {...kp.position}}));
+      return smoothed;
     }
 
-    function drawKeypoints(keypoints, minConf, ctx, color) {
-      let count = 0;
+    function getCanvasCoordinates(x, y) {
+      // Video dimensions
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      const videoAspect = videoWidth / videoHeight;
       
-      // Calculate scale factors
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
+      // Canvas/window dimensions
+      const canvasWidth = canvas.width;
+      const canvasHeight = canvas.height;
+      const canvasAspect = canvasWidth / canvasHeight;
+      
+      let scale, offsetX, offsetY;
+      
+      if (canvasAspect > videoAspect) {
+        // Canvas is wider than video - video fills height
+        scale = canvasHeight / videoHeight;
+        offsetX = (canvasWidth - videoWidth * scale) / 2;
+        offsetY = 0;
+      } else {
+        // Canvas is taller than video - video fills width
+        scale = canvasWidth / videoWidth;
+        offsetX = 0;
+        offsetY = (canvasHeight - videoHeight * scale) / 2;
+      }
+      
+      // Apply scaling and offset, and flip horizontally for front camera
+      let canvasX = x * scale + offsetX;
+      let canvasY = y * scale + offsetY;
+      
+      // Mirror the X coordinate to match the mirrored video
+      if (facingMode === 'user') {
+        canvasX = canvasWidth - canvasX;
+      }
+      
+      return { x: canvasX, y: canvasY };
+    }
+
+    function drawKeypoints(keypoints, minConf, ctx) {
+      let count = 0;
       
       keypoints.forEach((kp, index) => {
         if (kp.score < minConf) return;
         count++;
         
         const { y, x } = kp.position;
+        const coords = getCanvasCoordinates(x, y);
         
-        // Scale the coordinates to canvas size
-        const canvasX = x * scaleX;
-        const canvasY = y * scaleY;
-        
-        // Log for debugging
         if (index === 0) {
-          console.log(`Keypoint 0: video(${x.toFixed(1)}, ${y.toFixed(1)}) -> canvas(${canvasX.toFixed(1)}, ${canvasY.toFixed(1)})`);
-          console.log(`Scale factors: ${scaleX.toFixed(2)} x ${scaleY.toFixed(2)}`);
+          console.log(`Keypoint 0: video(${x.toFixed(0)}, ${y.toFixed(0)}) -> canvas(${coords.x.toFixed(0)}, ${coords.y.toFixed(0)})`);
         }
         
-        // Draw keypoint
         ctx.beginPath();
-        ctx.arc(canvasX, canvasY, 15, 0, 2 * Math.PI);
-        ctx.fillStyle = color.keypoint;
+        ctx.arc(coords.x, coords.y, 15, 0, 2 * Math.PI);
+        ctx.fillStyle = '#00ff00';
         ctx.fill();
         ctx.strokeStyle = "white";
         ctx.lineWidth = 5;
         ctx.stroke();
       });
+      
       return count;
     }
 
-    function drawSkeleton(keypoints, minConf, ctx, color) {
+    function drawSkeleton(keypoints, minConf, ctx) {
       const adjacentKeyPoints = posenet.getAdjacentKeyPoints(keypoints, minConf);
       
-      // Calculate scale factors
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
-      
       adjacentKeyPoints.forEach(([kp1, kp2]) => {
-        const { y: y1, x: x1 } = kp1.position;
-        const { y: y2, x: x2 } = kp2.position;
-        
-        // Scale coordinates
-        const canvasX1 = x1 * scaleX;
-        const canvasY1 = y1 * scaleY;
-        const canvasX2 = x2 * scaleX;
-        const canvasY2 = y2 * scaleY;
+        const pos1 = getCanvasCoordinates(kp1.position.x, kp1.position.y);
+        const pos2 = getCanvasCoordinates(kp2.position.x, kp2.position.y);
         
         ctx.beginPath();
-        ctx.moveTo(canvasX1, canvasY1);
-        ctx.lineTo(canvasX2, canvasY2);
+        ctx.moveTo(pos1.x, pos1.y);
+        ctx.lineTo(pos2.x, pos2.y);
         ctx.lineWidth = 8;
-        ctx.strokeStyle = color.skeleton;
+        ctx.strokeStyle = '#00ffff';
         ctx.stroke();
       });
     }
@@ -296,26 +309,17 @@
       if (!net || !isRunning) return;
       
       const pose = await net.estimateSinglePose(video, {
-        flipHorizontal: facingMode === 'user',
+        flipHorizontal: false, // Don't flip in detection since we handle it in drawing
       });
       
-      // Smooth the pose
-      const smoothedKeypoints = smoothKeypoints(
-        pose.keypoints, 
-        previousPoses.length > 0 ? previousPoses[0].keypoints : null
-      );
-      
-      previousPoses = [{keypoints: smoothedKeypoints}];
+      const smoothedKeypoints = smoothKeypoints(pose.keypoints);
 
-      // Update stats
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
-      // Clear and draw
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      const color = colors[0];
-      const keypointCount = drawKeypoints(smoothedKeypoints, minConfidence, ctx, color);
-      drawSkeleton(smoothedKeypoints, minConfidence, ctx, color);
+      const keypointCount = drawKeypoints(smoothedKeypoints, minConfidence, ctx);
+      drawSkeleton(smoothedKeypoints, minConfidence, ctx);
       
       keypointCountEl.textContent = keypointCount;
       
@@ -342,14 +346,21 @@
 
     flipBtn.addEventListener('click', async () => {
       facingMode = facingMode === 'user' ? 'environment' : 'user';
-      previousPoses = [];
+      previousKeypoints = null;
+      
+      // Update video mirror effect
+      if (facingMode === 'user') {
+        video.style.transform = 'scaleX(-1)';
+      } else {
+        video.style.transform = 'scaleX(1)';
+      }
+      
       await setupCamera();
     });
 
-    // Handle orientation changes
-    window.addEventListener('resize', resizeCanvas);
-    window.addEventListener('orientationchange', () => {
-      setTimeout(resizeCanvas, 100);
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     });
 
     async function init() {
