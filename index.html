@@ -175,14 +175,12 @@
         video.onloadedmetadata = () => {
           video.play();
           setTimeout(() => {
-            // Set canvas to full screen
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             
             console.log("Setup complete");
             console.log("Video size:", video.videoWidth, video.videoHeight);
             console.log("Canvas size:", canvas.width, canvas.height);
-            console.log("Window size:", window.innerWidth, window.innerHeight);
             
             resolve();
           }, 500);
@@ -214,35 +212,34 @@
     }
 
     function getCanvasCoordinates(x, y) {
-      // Video dimensions
       const videoWidth = video.videoWidth;
       const videoHeight = video.videoHeight;
       const videoAspect = videoWidth / videoHeight;
       
-      // Canvas/window dimensions
       const canvasWidth = canvas.width;
       const canvasHeight = canvas.height;
       const canvasAspect = canvasWidth / canvasHeight;
       
       let scale, offsetX, offsetY;
       
+      // object-fit: cover behavior
       if (canvasAspect > videoAspect) {
-        // Canvas is wider than video - video fills height
-        scale = canvasHeight / videoHeight;
-        offsetX = (canvasWidth - videoWidth * scale) / 2;
-        offsetY = 0;
-      } else {
-        // Canvas is taller than video - video fills width
+        // Canvas is wider - video fills width, crops top/bottom
         scale = canvasWidth / videoWidth;
         offsetX = 0;
         offsetY = (canvasHeight - videoHeight * scale) / 2;
+      } else {
+        // Canvas is taller - video fills height, crops left/right
+        scale = canvasHeight / videoHeight;
+        offsetX = (canvasWidth - videoWidth * scale) / 2;
+        offsetY = 0;
       }
       
-      // Apply scaling and offset, and flip horizontally for front camera
+      // Scale coordinates
       let canvasX = x * scale + offsetX;
       let canvasY = y * scale + offsetY;
       
-      // Mirror the X coordinate to match the mirrored video
+      // Mirror X for front camera
       if (facingMode === 'user') {
         canvasX = canvasWidth - canvasX;
       }
@@ -261,7 +258,7 @@
         const coords = getCanvasCoordinates(x, y);
         
         if (index === 0) {
-          console.log(`Keypoint 0: video(${x.toFixed(0)}, ${y.toFixed(0)}) -> canvas(${coords.x.toFixed(0)}, ${coords.y.toFixed(0)})`);
+          console.log(`Video: ${x.toFixed(0)}, ${y.toFixed(0)} -> Canvas: ${coords.x.toFixed(0)}, ${coords.y.toFixed(0)}`);
         }
         
         ctx.beginPath();
@@ -309,7 +306,7 @@
       if (!net || !isRunning) return;
       
       const pose = await net.estimateSinglePose(video, {
-        flipHorizontal: false, // Don't flip in detection since we handle it in drawing
+        flipHorizontal: false,
       });
       
       const smoothedKeypoints = smoothKeypoints(pose.keypoints);
@@ -348,7 +345,6 @@
       facingMode = facingMode === 'user' ? 'environment' : 'user';
       previousKeypoints = null;
       
-      // Update video mirror effect
       if (facingMode === 'user') {
         video.style.transform = 'scaleX(-1)';
       } else {
