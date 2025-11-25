@@ -1,118 +1,62 @@
+<!-- /index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>PoseNet Mobile</title>
+  <!-- Prevent iOS zoom + enable proper viewport -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>PoseNet Mobile (iPhone Fix)</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    body {
-      background: #000;
-      height: 100vh;
-      overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      color: white;
-    }
-    #container {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-    }
-    #video {
-      display: none;
-    }
-    #canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#000; height:100vh; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,sans-serif; color:#fff; }
+    #container { position:fixed; inset:0; }
+    #video { display:none; } /* keep hidden, we draw to canvas */
+    #canvas { position:absolute; inset:0; width:100%; height:100%; }
     #loading {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.85);
-      padding: 15px 25px;
-      border-radius: 20px;
-      font-size: 17px;
-      z-index: 10;
-      text-align: center;
-      max-width: 90%;
+      position:fixed; top:20px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,.85); padding:12px 18px; border-radius:16px; font-size:16px; z-index:10;
     }
     #controls {
-      position: fixed;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      display: flex;
-      flex-direction: column;
-      gap: 15px;
-      align-items: center;
+      position:fixed; bottom:40px; left:50%; transform:translateX(-50%); z-index:10;
+      display:flex; flex-direction:column; gap:12px; align-items:center;
     }
     button {
-      padding: 18px 35px;
-      background: rgba(0, 122, 255, 0.95);
-      color: white;
-      border: none;
-      border-radius: 30px;
-      font-size: 18px;
-      font-weight: 600;
-      min-width: 200px;
+      padding:16px 28px; background:rgba(0,122,255,.95); color:#fff; border:0; border-radius:28px;
+      font-size:16px; font-weight:600; min-width:200px;
     }
-    .secondary-btn {
-      background: rgba(255, 255, 255, 0.2);
-      padding: 12px 25px;
-      font-size: 15px;
-      min-width: auto;
-    }
-    .hidden {
-      display: none;
-    }
+    .secondary-btn { background:rgba(255,255,255,.2); padding:10px 20px; font-size:14px; min-width:auto; }
+    .hidden { display:none; }
     #stats {
-      position: fixed;
-      top: 70px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.7);
-      padding: 10px 20px;
-      border-radius: 15px;
-      font-size: 14px;
-      z-index: 10;
+      position:fixed; top:64px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,.7); padding:8px 14px; border-radius:12px; font-size:13px; z-index:10;
     }
-    .value {
-      color: #0ff;
-      font-weight: bold;
-    }
+    .value { color:#0ff; font-weight:700; }
   </style>
 </head>
 <body>
   <div id="container">
     <div id="loading">Loading AI model...</div>
     <div id="stats" class="hidden">
-      People: <span id="peopleCount" class="value">0</span> | 
+      People: <span id="peopleCount" class="value">0</span> |
       FPS: <span id="fps" class="value">0</span> |
       Keypoints: <span id="keypointCount" class="value">0</span>
     </div>
+
+    <!-- Important: playsinline for iOS -->
     <video id="video" playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
+
     <div id="controls">
-      <button id="startBtn">Start Camera</button>
+      <button id="startBtn" disabled>Start Camera</button>
       <button id="flipBtn" class="secondary-btn hidden">Flip Camera</button>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
+  <!-- Lock versions: PoseNet works reliably with tfjs 3.21.0 -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.1/dist/posenet.min.js"></script>
+
   <script>
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
@@ -124,63 +68,103 @@
     const fpsEl = document.getElementById("fps");
     const peopleCountEl = document.getElementById("peopleCount");
     const keypointCountEl = document.getElementById("keypointCount");
-    
+
     let net = null;
     let previousKeypoints = null;
     const smoothingFactor = 0.5;
+
     let isRunning = false;
-    let facingMode = 'user';
+    let facingMode = "user";
     let stream = null;
     let minConfidence = 0.3;
-    
-    let lastFrameTime = Date.now();
-    let frameCount = 0;
+
+    let lastFrameTime = performance.now();
+    let frames = 0;
+
+    // Maintain DPR-correct canvas so coordinates line up on iPhone
+    function resizeCanvasToDisplaySize() {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const rect = canvas.getBoundingClientRect();
+      const needResize = canvas.width !== Math.round(rect.width * dpr) || canvas.height !== Math.round(rect.height * dpr);
+
+      if (needResize) {
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // scale drawing ops to CSS pixels
+      }
+    }
 
     async function setupCamera() {
-      loadingEl.textContent = "Starting camera...";
-      
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-      
-      stream = await navigator.mediaDevices.getUserMedia({
+      loadingEl.textContent = "Starting camera…";
+
+      // stop old stream
+      if (stream) stream.getTracks().forEach(t => t.stop());
+
+      // iPhone likes exact/ideal 1280x720
+      const constraints = {
         audio: false,
-        video: { 
-          facingMode: facingMode,
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        },
-      });
-      
+        video: {
+          facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream;
-      
-      return new Promise((resolve) => {
+
+      return new Promise(resolve => {
         video.onloadedmetadata = () => {
           video.play();
+          // Give iOS a tiny moment to update videoWidth/Height
           setTimeout(() => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            
+            resizeCanvasToDisplaySize();
             console.log("Camera:", facingMode);
             console.log("Video:", video.videoWidth, "x", video.videoHeight);
-            console.log("Canvas:", canvas.width, "x", canvas.height);
-            
+            console.log("Canvas CSS:", canvas.getBoundingClientRect().width, "x", canvas.getBoundingClientRect().height,
+                        " | backing:", canvas.width, "x", canvas.height);
             resolve();
-          }, 500);
+          }, 200);
         };
       });
     }
 
+    function coverLayout() {
+      // Compute how the video is drawn (object-fit: cover) in CSS pixel space
+      const vw = video.videoWidth || 1;
+      const vh = video.videoHeight || 1;
+
+      const rect = canvas.getBoundingClientRect();
+      const cw = rect.width;
+      const ch = rect.height;
+
+      const videoAspect = vw / vh;
+      const canvasAspect = cw / ch;
+
+      let drawW, drawH, offX, offY, scale;
+      if (canvasAspect > videoAspect) {
+        drawW = cw;
+        drawH = cw / videoAspect;
+        offX = 0;
+        offY = (ch - drawH) / 2;
+        scale = cw / vw;
+      } else {
+        drawH = ch;
+        drawW = ch * videoAspect;
+        offX = (cw - drawW) / 2;
+        offY = 0;
+        scale = ch / vh;
+      }
+      return { drawW, drawH, offX, offY, scale };
+    }
+
     function smoothKeypoints(keypoints) {
       if (!previousKeypoints) {
-        previousKeypoints = keypoints.map(kp => ({...kp, position: {...kp.position}}));
+        previousKeypoints = keypoints.map(kp => ({ ...kp, position: { ...kp.position } }));
         return keypoints;
       }
-
       const smoothed = keypoints.map((kp, i) => {
-        const prev = previousKeypoints[i];
-        if (!prev) return kp;
-
+        const prev = previousKeypoints[i] || kp;
         return {
           ...kp,
           position: {
@@ -189,214 +173,140 @@
           }
         };
       });
-
-      previousKeypoints = smoothed.map(kp => ({...kp, position: {...kp.position}}));
+      previousKeypoints = smoothed.map(kp => ({ ...kp, position: { ...kp.position } }));
       return smoothed;
     }
 
     function drawFrame() {
-      const videoAspect = video.videoWidth / video.videoHeight;
-      const canvasAspect = canvas.width / canvas.height;
-      
-      let drawWidth, drawHeight, offsetX, offsetY;
-      
-      // Match object-fit: cover behavior
-      if (canvasAspect > videoAspect) {
-        drawWidth = canvas.width;
-        drawHeight = canvas.width / videoAspect;
-        offsetX = 0;
-        offsetY = (canvas.height - drawHeight) / 2;
-      } else {
-        drawHeight = canvas.height;
-        drawWidth = canvas.height * videoAspect;
-        offsetX = (canvas.width - drawWidth) / 2;
-        offsetY = 0;
-      }
-      
+      const { drawW, drawH, offX, offY } = coverLayout();
+
       ctx.save();
-      
-      // Mirror only for front camera
-      if (facingMode === 'user') {
+      // Mirror the video for front camera for *visuals only*
+      if (facingMode === "user") {
+        ctx.translate(canvas.getBoundingClientRect().width, 0);
         ctx.scale(-1, 1);
-        ctx.drawImage(video, -offsetX - drawWidth, offsetY, drawWidth, drawHeight);
+        ctx.drawImage(video, offX, offY, drawW, drawH);
       } else {
-        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+        ctx.drawImage(video, offX, offY, drawW, drawH);
       }
-      
       ctx.restore();
     }
 
-    function drawKeypoints(keypoints, minConf, ctx) {
+    function mapToCanvas(x, y) {
+      // Map PoseNet video-space coords -> canvas CSS pixel coords (account for "cover" + letterboxing)
+      const { offX, offY, scale } = coverLayout();
+      const cx = x * scale + offX;
+      const cy = y * scale + offY;
+      return { x: cx, y: cy };
+    }
+
+    function drawKeypoints(keypoints, minConf) {
       let count = 0;
-      
-      const videoAspect = video.videoWidth / video.videoHeight;
-      const canvasAspect = canvas.width / canvas.height;
-      
-      let scale, offsetX, offsetY;
-      
-      // Calculate scale and offset (same as drawFrame)
-      if (canvasAspect > videoAspect) {
-        scale = canvas.width / video.videoWidth;
-        offsetX = 0;
-        offsetY = (canvas.height - video.videoHeight * scale) / 2;
-      } else {
-        scale = canvas.height / video.videoHeight;
-        offsetX = (canvas.width - video.videoWidth * scale) / 2;
-        offsetY = 0;
-      }
-      
-      keypoints.forEach((kp, index) => {
+      keypoints.forEach((kp, i) => {
         if (kp.score < minConf) return;
         count++;
-        
-        let { y, x } = kp.position;
-        
-        // Scale to canvas
-        x = x * scale + offsetX;
-        y = y * scale + offsetY;
-        
-        // Mirror for front camera
-        if (facingMode === 'user') {
-          x = canvas.width - x;
-        }
-        
-        if (index === 0) {
-          console.log(`Keypoint 0: video(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)})`);
-        }
-        
+        const { x, y } = mapToCanvas(kp.position.x, kp.position.y);
         ctx.beginPath();
-        ctx.arc(x, y, 20, 0, 2 * Math.PI);
-        ctx.fillStyle = '#00ff00';
+        ctx.arc(x, y, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = "#00ff00";
         ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 6;
-        ctx.stroke();
       });
-      
       return count;
     }
 
-    function drawSkeleton(keypoints, minConf, ctx) {
-      const adjacentKeyPoints = posenet.getAdjacentKeyPoints(keypoints, minConf);
-      
-      const videoAspect = video.videoWidth / video.videoHeight;
-      const canvasAspect = canvas.width / canvas.height;
-      
-      let scale, offsetX, offsetY;
-      
-      if (canvasAspect > videoAspect) {
-        scale = canvas.width / video.videoWidth;
-        offsetX = 0;
-        offsetY = (canvas.height - video.videoHeight * scale) / 2;
-      } else {
-        scale = canvas.height / video.videoHeight;
-        offsetX = (canvas.width - video.videoWidth * scale) / 2;
-        offsetY = 0;
-      }
-      
-      adjacentKeyPoints.forEach(([kp1, kp2]) => {
-        let x1 = kp1.position.x * scale + offsetX;
-        let y1 = kp1.position.y * scale + offsetY;
-        let x2 = kp2.position.x * scale + offsetX;
-        let y2 = kp2.position.y * scale + offsetY;
-        
-        // Mirror for front camera
-        if (facingMode === 'user') {
-          x1 = canvas.width - x1;
-          x2 = canvas.width - x2;
-        }
-        
+    function drawSkeleton(keypoints, minConf) {
+      const adjacent = posenet.getAdjacentKeyPoints(keypoints, minConf);
+      adjacent.forEach(([a, b]) => {
+        const p1 = mapToCanvas(a.position.x, a.position.y);
+        const p2 = mapToCanvas(b.position.x, b.position.y);
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.lineWidth = 10;
-        ctx.strokeStyle = '#00ffff';
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#00ffff";
         ctx.stroke();
       });
-      
-      console.log("Drew", adjacentKeyPoints.length, "skeleton lines");
     }
 
     function updateFPS() {
-      frameCount++;
-      const now = Date.now();
+      frames++;
+      const now = performance.now();
       const elapsed = now - lastFrameTime;
-      
       if (elapsed >= 1000) {
-        const fps = Math.round((frameCount * 1000) / elapsed);
-        fpsEl.textContent = fps;
-        frameCount = 0;
+        const fps = Math.round((frames * 1000) / elapsed);
+        fpsEl.textContent = String(fps);
+        frames = 0;
         lastFrameTime = now;
       }
     }
 
     async function detectPose() {
       if (!net || !isRunning) return;
-      
+
+      // Let PoseNet handle the horizontal flip for front camera
       const pose = await net.estimateSinglePose(video, {
-        flipHorizontal: false,
+        flipHorizontal: facingMode === "user"
       });
-      
-      const smoothedKeypoints = smoothKeypoints(pose.keypoints);
+
+      const smoothed = smoothKeypoints(pose.keypoints);
 
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
+      // Clear + draw frame + overlays
+      ctx.clearRect(0, 0, canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height);
       drawFrame();
-      
-      const keypointCount = drawKeypoints(smoothedKeypoints, minConfidence, ctx);
-      drawSkeleton(smoothedKeypoints, minConfidence, ctx);
-      
-      keypointCountEl.textContent = keypointCount;
-      
+      const keypointCount = drawKeypoints(smoothed, minConfidence);
+      drawSkeleton(smoothed, minConfidence);
+      keypointCountEl.textContent = String(keypointCount);
+
       updateFPS();
       requestAnimationFrame(detectPose);
     }
 
-    startBtn.addEventListener('click', async () => {
+    startBtn.addEventListener("click", async () => {
       try {
         startBtn.disabled = true;
         await setupCamera();
+        statsEl.classList.remove("hidden");
+        flipBtn.classList.remove("hidden");
+        startBtn.classList.add("hidden");
         loadingEl.textContent = "Move around! 👋";
-        statsEl.classList.remove('hidden');
-        flipBtn.classList.remove('hidden');
-        startBtn.classList.add('hidden');
         isRunning = true;
         detectPose();
       } catch (err) {
-        console.error("Error:", err);
-        loadingEl.textContent = "Error: " + err.message;
+        loadingEl.textContent = "Error: " + (err && err.message ? err.message : err);
         startBtn.disabled = false;
+        console.error(err);
       }
     });
 
-    flipBtn.addEventListener('click', async () => {
-      facingMode = facingMode === 'user' ? 'environment' : 'user';
-      previousKeypoints = null;
+    flipBtn.addEventListener("click", async () => {
+      facingMode = facingMode === "user" ? "environment" : "user";
+      previousKeypoints = null; // reset smoothing
       await setupCamera();
     });
 
-    window.addEventListener('resize', () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+    window.addEventListener("resize", () => {
+      resizeCanvasToDisplaySize();
     });
 
     async function init() {
       try {
-        loadingEl.textContent = "Loading AI model...";
-        
+        loadingEl.textContent = "Loading AI model…";
+        await tf.setBackend("webgl"); // iPhone: best performance
+        await tf.ready();
+
         net = await posenet.load({
           architecture: "MobileNetV1",
           outputStride: 16,
-          inputResolution: { width: 640, height: 480 },
-          multiplier: 0.75,
+          inputResolution: { width: 353, height: 353 }, // robust on mobile
+          multiplier: 0.75
         });
 
         loadingEl.textContent = "Ready! Tap Start Camera";
         startBtn.disabled = false;
       } catch (err) {
-        console.error("Error:", err);
+        console.error(err);
         loadingEl.textContent = "Error loading model";
       }
     }
