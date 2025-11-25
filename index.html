@@ -161,9 +161,9 @@
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             
+            console.log("Camera:", facingMode);
             console.log("Video:", video.videoWidth, "x", video.videoHeight);
             console.log("Canvas:", canvas.width, "x", canvas.height);
-            console.log("Window:", window.innerWidth, "x", window.innerHeight);
             
             resolve();
           }, 500);
@@ -195,19 +195,55 @@
     }
 
     function drawFrame() {
-      // Draw video frame mirrored
+      const videoAspect = video.videoWidth / video.videoHeight;
+      const canvasAspect = canvas.width / canvas.height;
+      
+      let drawWidth, drawHeight, offsetX, offsetY;
+      
+      // Match object-fit: cover behavior
+      if (canvasAspect > videoAspect) {
+        drawWidth = canvas.width;
+        drawHeight = canvas.width / videoAspect;
+        offsetX = 0;
+        offsetY = (canvas.height - drawHeight) / 2;
+      } else {
+        drawHeight = canvas.height;
+        drawWidth = canvas.height * videoAspect;
+        offsetX = (canvas.width - drawWidth) / 2;
+        offsetY = 0;
+      }
+      
       ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+      
+      // Mirror only for front camera
+      if (facingMode === 'user') {
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -offsetX - drawWidth, offsetY, drawWidth, drawHeight);
+      } else {
+        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+      }
+      
       ctx.restore();
     }
 
     function drawKeypoints(keypoints, minConf, ctx) {
       let count = 0;
       
-      // Calculate scale from video to canvas
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
+      const videoAspect = video.videoWidth / video.videoHeight;
+      const canvasAspect = canvas.width / canvas.height;
+      
+      let scale, offsetX, offsetY;
+      
+      // Calculate scale and offset (same as drawFrame)
+      if (canvasAspect > videoAspect) {
+        scale = canvas.width / video.videoWidth;
+        offsetX = 0;
+        offsetY = (canvas.height - video.videoHeight * scale) / 2;
+      } else {
+        scale = canvas.height / video.videoHeight;
+        offsetX = (canvas.width - video.videoWidth * scale) / 2;
+        offsetY = 0;
+      }
       
       keypoints.forEach((kp, index) => {
         if (kp.score < minConf) return;
@@ -215,18 +251,19 @@
         
         let { y, x } = kp.position;
         
-        // Scale to canvas size
-        x = x * scaleX;
-        y = y * scaleY;
+        // Scale to canvas
+        x = x * scale + offsetX;
+        y = y * scale + offsetY;
         
-        // Mirror horizontally
-        x = canvas.width - x;
-        
-        if (index === 0) {
-          console.log(`Keypoint 0: Original(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> Scaled(${x.toFixed(0)}, ${y.toFixed(0)})`);
+        // Mirror for front camera
+        if (facingMode === 'user') {
+          x = canvas.width - x;
         }
         
-        // Draw big visible keypoint
+        if (index === 0) {
+          console.log(`Keypoint 0: video(${kp.position.x.toFixed(0)}, ${kp.position.y.toFixed(0)}) -> canvas(${x.toFixed(0)}, ${y.toFixed(0)})`);
+        }
+        
         ctx.beginPath();
         ctx.arc(x, y, 20, 0, 2 * Math.PI);
         ctx.fillStyle = '#00ff00';
@@ -242,18 +279,32 @@
     function drawSkeleton(keypoints, minConf, ctx) {
       const adjacentKeyPoints = posenet.getAdjacentKeyPoints(keypoints, minConf);
       
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
+      const videoAspect = video.videoWidth / video.videoHeight;
+      const canvasAspect = canvas.width / canvas.height;
+      
+      let scale, offsetX, offsetY;
+      
+      if (canvasAspect > videoAspect) {
+        scale = canvas.width / video.videoWidth;
+        offsetX = 0;
+        offsetY = (canvas.height - video.videoHeight * scale) / 2;
+      } else {
+        scale = canvas.height / video.videoHeight;
+        offsetX = (canvas.width - video.videoWidth * scale) / 2;
+        offsetY = 0;
+      }
       
       adjacentKeyPoints.forEach(([kp1, kp2]) => {
-        let x1 = kp1.position.x * scaleX;
-        let y1 = kp1.position.y * scaleY;
-        let x2 = kp2.position.x * scaleX;
-        let y2 = kp2.position.y * scaleY;
+        let x1 = kp1.position.x * scale + offsetX;
+        let y1 = kp1.position.y * scale + offsetY;
+        let x2 = kp2.position.x * scale + offsetX;
+        let y2 = kp2.position.y * scale + offsetY;
         
-        // Mirror horizontally
-        x1 = canvas.width - x1;
-        x2 = canvas.width - x2;
+        // Mirror for front camera
+        if (facingMode === 'user') {
+          x1 = canvas.width - x1;
+          x2 = canvas.width - x2;
+        }
         
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -290,13 +341,10 @@
 
       peopleCountEl.textContent = pose.score > 0.1 ? "1" : "0";
 
-      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // Draw video frame
       drawFrame();
       
-      // Draw pose
       const keypointCount = drawKeypoints(smoothedKeypoints, minConfidence, ctx);
       drawSkeleton(smoothedKeypoints, minConfidence, ctx);
       
